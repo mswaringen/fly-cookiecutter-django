@@ -1,23 +1,23 @@
-# fly.toml app configuration file generated for django-rss-reader-3 on 2024-04-30T16:49:31+01:00
+# fly.toml app configuration file generated for fly-cookiecutter-django-1 on 2024-05-01T15:44:30+01:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'django-rss-reader-3'
+app = 'fly-cookiecutter-django-1'
 primary_region = 'mad'
 console_command = '/code/manage.py shell'
 
 [build]
 
 [deploy]
-  release_command = "python manage.py migrate"
-
-[processes]
-  app = "python -m gunicorn --bind :8000 --workers 2 config.wsgi"
-  worker = "python -m celery -A config.celery_app:app worker -l DEBUG"
+  release_command = 'python manage.py migrate'
 
 [env]
   PORT = '8000'
+
+[processes]
+  app = 'python -m gunicorn --bind :8000 --workers 1 config.wsgi'
+  worker = 'python -m celery -A config.celery_app:app worker -l DEBUG'
 
 [http_service]
   internal_port = 8000
@@ -33,5 +33,5 @@ console_command = '/code/manage.py shell'
   cpus = 1
 
 [[statics]]
-  guest_path = '/code/staticfiles'
-  url_prefix = '/static'
+  guest_path = '/code/static'
+  url_prefix = '/static/'
