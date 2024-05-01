@@ -15,3 +15,8 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 
 # Load task modules from all registered Django app configs.
 app.autodiscover_tasks()
+
+# NEW
+@app.task(bind=True, ignore_result=False)
+def example_task(self):
+    print("You've triggered the example task!")
