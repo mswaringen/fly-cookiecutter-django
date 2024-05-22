@@ -1,16 +1,16 @@
-# fly.toml app configuration file generated for fly-cookiecutter-django-1 on 2024-05-01T15:44:30+01:00
+# fly.toml app configuration file generated for fly-cookiecutter-django-2 on 2024-05-21T17:21:43+01:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'fly-cookiecutter-django-1'
+app = 'fly-cookiecutter-django-2'
 primary_region = 'mad'
 console_command = '/code/manage.py shell'
 
 [build]
 
 [deploy]
-  release_command = 'python manage.py migrate'
+  release_command = 'sh /code/release.sh'
 
 [env]
   PORT = '8000'

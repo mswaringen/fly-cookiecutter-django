@@ -58,21 +58,24 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/* \
 COPY . /code
 
 # Set dummy vars for building purposes
-ENV DJANGO_SETTINGS_MODULE "config.settings.production"
-ENV DATABASE_URL "temp"
-ENV DJANGO_SECRET_KEY "non-secret-key-for-building-purposes"
-ENV REDIS_URL "temp"
-ENV DJANGO_ADMIN_URL "temp"
-ENV DJANGO_ALLOWED_HOSTS "temp"
-ENV MAILJET_API_KEY "temp"
-ENV MAILJET_SECRET_KEY "temp"
-ENV SENTRY_DSN ""
-ENV DJANGO_AWS_ACCESS_KEY_ID "temp"
-ENV DJANGO_AWS_SECRET_ACCESS_KEY "temp"
-ENV DJANGO_AWS_STORAGE_BUCKET_NAME "temp"
+# ENV DJANGO_SETTINGS_MODULE "config.settings.production"
+# ENV DATABASE_URL "temp"
+# ENV DJANGO_SECRET_KEY "non-secret-key-for-building-purposes"
+# ENV REDIS_URL "temp"
+# ENV DJANGO_ADMIN_URL "temp"
+# ENV DJANGO_ALLOWED_HOSTS "temp"
+# ENV MAILJET_API_KEY "temp"
+# ENV MAILJET_SECRET_KEY "temp"
+# ENV SENTRY_DSN ""
+# ENV DJANGO_AWS_ACCESS_KEY_ID "temp"
+# ENV DJANGO_AWS_SECRET_ACCESS_KEY "temp"
+# ENV DJANGO_AWS_STORAGE_BUCKET_NAME "temp"
 
-RUN python manage.py collectstatic --noinput
+# RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
 CMD ["gunicorn", "--bind", ":8000", "--workers", "1", "config.wsgi"]
+
+# CMD ["/bin/bash", "-c", "python manage.py collectstatic --noinput; gunicorn --bind :8000 --workers 1 config.wsgi"]
+# CMD ["/bin/bash", "-c", "python manage.py collectstatic --noinput && gunicorn --bind :8000 --workers 1 config.wsgi"]

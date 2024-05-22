@@ -1,97 +1,306 @@
-# Fly Cookiecutter Django
+# Deploying Cookiecutter Django on Fly.io
+### _with Celery, Postgres, Redis, and S3 storage with Tigris_
 
-Modified Cookiecutter Django for deployment on Fly.io
 
-[![Built with Cookiecutter Django](https://img.shields.io/badge/built%20with-Cookiecutter%20Django-ff69b4.svg?logo=cookiecutter)](https://github.com/cookiecutter/cookiecutter-django/)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-License: MIT
+## tl;dr
+Cookiecutter Django is awesome but can be difficult to deploy the entire stack apart from the officially supported options. With a few small tweaks we can deploy on Fly.io with everything included (Celery workers, PG, Redis, S3 storage)
 
-## Settings
+> Note: We will be using the celery_django_results package to save job status to Postgres and view results in Django Admin. This is used as a replacement for Flower in production.
 
-Moved to [settings](http://cookiecutter-django.readthedocs.io/en/latest/settings.html).
+## Steps
 
-## Basic Commands
+1) Generate project locally for Docker
 
-### Setting Up Your Users
+2) Add new Dockerfile + fly.toml
 
-- To create a **normal user account**, just go to Sign Up and fill out the form. Once you submit it, you'll see a "Verify Your E-mail Address" page. Go to your console to see a simulated email verification message. Copy the link into your browser. Now the user's email should be verified and ready to go.
+3) Inject secrets from CLI
 
-- To create a **superuser account**, use this command:
+4) Fly launch + fly deploy
 
-      $ python manage.py createsuperuser
 
-For convenience, you can keep your normal user logged in on Chrome and your superuser logged in on Firefox (or similar), so that you can see how the site behaves for both kinds of users.
+Now lets dive in...
 
-### Type checks
+## 1) Generate project locally with Docker
 
-Running type checks with mypy:
+Prereqs: Docker, Cookiecutter
 
-    $ mypy fly_cookiecutter_django
+Follow the [instructions](https://cookiecutter-django.readthedocs.io/en/latest/developing-locally-docker.html) to setup a local project with Docker. 
 
-### Test coverage
+### _Optional_ 
 
-To run the tests, check your test coverage, and generate an HTML coverage report:
+#### _A) Create test-task view_
 
-    $ coverage run -m pytest
-    $ coverage html
-    $ open htmlcov/index.html
+This view will trigger a worker action upon GET request, letting us easily observe the entire system in action.
 
-#### Running tests with pytest
+1) Add the following function to `config/celery_app.py` 
 
-    $ pytest
-
-### Live reloading and Sass CSS compilation
-
-Moved to [Live reloading and SASS compilation](https://cookiecutter-django.readthedocs.io/en/latest/developing-locally.html#sass-compilation-live-reloading).
-
-### Celery
-
-This app comes with Celery.
-
-To run a celery worker:
-
-```bash
-cd fly_cookiecutter_django
-celery -A config.celery_app worker -l info
+```
+   @app.task(bind=True, ignore_result=False)
+   def example_task(self):
+      print("You've triggered the example task!")
 ```
 
-Please note: For Celery's import magic to work, it is important _where_ the celery commands are run. If you are in the same folder with _manage.py_, you should be right.
+2) Create `test_views.py` in the `config` directory and add the following code
 
-To run [periodic tasks](https://docs.celeryq.dev/en/stable/userguide/periodic-tasks.html), you'll need to start the celery beat scheduler service. You can start it as a standalone process:
+```
+   from django.http import HttpResponse
+   from .celery_app import example_task
 
-```bash
-cd fly_cookiecutter_django
-celery -A config.celery_app beat
+   def test_task(request):
+      example_task.delay()
+      return HttpResponse("Task triggered, see Celery logs")
 ```
 
-or you can embed the beat service inside a worker with the `-B` option (not recommended for production use):
+3) Now modify `url_patterns ` in `config/urls.py` with the line
 
-```bash
-cd fly_cookiecutter_django
-celery -A config.celery_app worker -B -l info
+```
+   path("test-task/", test_views.test_task, name="test_task"),
 ```
 
-### Email Server
+   After importing the view with
 
-In development, it is often nice to be able to see emails that are being sent from your application. For that reason local SMTP server [Mailpit](https://github.com/axllent/mailpit) with a web interface is available as docker container.
+```
+   from config import test_views
+```
 
-Container mailpit will start automatically when you will run all docker containers.
-Please check [cookiecutter-django Docker documentation](http://cookiecutter-django.readthedocs.io/en/latest/deployment-with-docker.html) for more details how to start all containers.
+#### _B) Install [celery-django-results](https://github.com/celery/django-celery-results)_
+This allows us to view the results of Celery worker tasks in the database with Django Admin
 
-With Mailpit running, to view messages that are sent by your application, open your browser and go to `http://127.0.0.1:8025`
+1) Add `django-celery-results==2.5.1` to `requirements/base.txt`
 
-### Sentry
+2) Add `"django_celery_results",` to `INSTALLED_APPS` in `config/settings/base.py`
 
-Sentry is an error logging aggregator service. You can sign up for a free account at <https://sentry.io/signup/?code=cookiecutter> or download and host it yourself.
-The system is set up with reasonable defaults, including 404 logging and integration with the WSGI application.
+3) Further modify `base.py` with the following additions
 
-You must set the DSN url in production.
+```
+   CELERY_RESULT_BACKEND = env.str("CELERY_RESULT_BACKEND", "django-db”), 
+   CELERY_TASK_TRACK_STARTED = True
+```
 
-## Deployment
+   Modify the following line to allow CELERY_BROKER_URL to access REDIS_URL directly (this will be set by Fly automatically)
 
-The following details how to deploy this application.
+```
+   CELERY_BROKER_URL = env('CELERY_BROKER_URL', default=env('REDIS_URL'))
+```
 
-### Docker
 
-See detailed [cookiecutter-django Docker documentation](http://cookiecutter-django.readthedocs.io/en/latest/deployment-with-docker.html).
+4) Build and migrate
+
+```
+   docker compose -f local.yml build
+   docker compose -f local.yml build
+   docker compose -f local.yml run --rm django python manage.py migrate
+```
+
+#### _C) Test locally with Flower and Django Admin_
+
+Run the stack and create superuser
+
+```
+   export COMPOSE_FILE=local.yml
+   docker compose up
+   docker compose run --rm django python manage.py createsuperuser
+```
+
+In a browser open up three tabs:
+
+   1) Flower (Celery worker monitor): [http://localhost:5555/](http://localhost:5555/)
+   > _Note: the login credentials are set in .envs/.local/.django_
+
+   2) Django Admin: [http://localhost:8000/admin](http://localhost:8000/admin)
+
+   3) Web test-task: [http://localhost:8000/test-task](http://localhost:8000/test-task)
+
+> The test-task GET request kicks off a worker task. Check the activity in the Flower tab, and then check again in Django Admin under `Celery Results / Task Results`
+>> _If you see Task State: SUCCESS you are ready to move to deployment!_ 
+
+## 2) Create fly.toml and custom Dockerfile
+
+_[Full description](https://fly.io/docs/apps/launch/) of the Fly launch and deploy process_
+
+Prereqs: flytmcl
+
+Running `fly launch` will create generic fly.toml and Dockerfile required for deployment, however we need custom files for Cookiecutter Django
+
+### Custom Dockerfile
+
+This is a version of the Dockerfile found in `compose/production/django/Dockerfile` modified to fit Fly's build process.
+
+> add notes about injecting dummy vars to run collect
+
+_Dockerfile_
+```
+# define an alias for the specific python version used in this file.
+FROM docker.io/python:3.12.3-slim-bookworm as python
+
+# Python build stage
+FROM python as python-build-stage
+
+ARG BUILD_ENVIRONMENT=production
+
+# Install apt packages
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  # dependencies for building Python packages
+  build-essential \
+  # psycopg dependencies
+  libpq-dev
+
+# Requirements are installed here to ensure they will be cached.
+COPY ./requirements .
+
+# Create Python Dependency and Sub-Dependency Wheels.
+RUN pip wheel --wheel-dir /usr/src/app/wheels  \
+  -r ${BUILD_ENVIRONMENT}.txt
+
+
+# Python 'run' stage
+FROM python as python-run-stage
+
+ARG BUILD_ENVIRONMENT=production
+ARG APP_HOME=/code
+
+ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV BUILD_ENV ${BUILD_ENVIRONMENT}
+
+WORKDIR ${APP_HOME}
+
+RUN addgroup --system django \
+    && adduser --system --ingroup django django
+
+
+# Install required system dependencies
+RUN apt-get update && apt-get install --no-install-recommends -y \
+  # psycopg dependencies
+  libpq-dev \
+  # Translations dependencies
+  gettext \
+  # cleaning up unused files
+  && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
+  && rm -rf /var/lib/apt/lists/*
+
+# All absolute dir copies ignore workdir instruction. All relative dir copies are wrt to the workdir instruction
+# copy python dependency wheels from python-build-stage
+COPY --from=python-build-stage /usr/src/app/wheels  /wheels/
+
+# use wheels to install python dependencies
+RUN pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/* \
+  && rm -rf /wheels/
+
+COPY . /code
+
+# Set dummy vars for building purposes
+ENV DJANGO_SETTINGS_MODULE "config.settings.production"
+ENV DATABASE_URL "temp"
+ENV DJANGO_SECRET_KEY "non-secret-key-for-building-purposes"
+ENV REDIS_URL "temp"
+ENV DJANGO_ADMIN_URL "temp"
+ENV DJANGO_ALLOWED_HOSTS "temp"
+ENV MAILJET_API_KEY "temp"
+ENV MAILJET_SECRET_KEY "temp"
+ENV SENTRY_DSN ""
+ENV DJANGO_AWS_ACCESS_KEY_ID "temp"
+ENV DJANGO_AWS_SECRET_ACCESS_KEY "temp"
+ENV DJANGO_AWS_STORAGE_BUCKET_NAME "temp"
+
+RUN python manage.py collectstatic --noinput
+
+EXPOSE 8000
+
+CMD ["gunicorn", "--bind", ":8000", "--workers", "1", "config.wsgi"]
+
+```
+
+### Custom fly.toml
+
+As the primary config file, fly.toml here is modifed here to match varible names in the Dockerfile, add a Celery worker process, and run migrate on deploy.
+
+The following variables require user input: `app, primary_region`
+> Note the number of workers can be set under `processes/app` (default is 1)
+
+_fly.toml_
+```
+# fly.toml app configuration file generated for fly-cookiecutter-django-1 on 2024-05-01T15:44:30+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'fly-cookiecutter-django-1'
+primary_region = 'mad'
+console_command = '/code/manage.py shell'
+
+[build]
+
+[deploy]
+  release_command = 'python manage.py migrate'
+
+[env]
+  PORT = '8000'
+
+[processes]
+  app = 'python -m gunicorn --bind :8000 --workers 1 config.wsgi'
+  worker = 'python -m celery -A config.celery_app:app worker -l DEBUG'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[statics]]
+  guest_path = '/code/static'
+  url_prefix = '/static/'
+
+```
+
+## 3) Launch and Deploy
+
+### Launch
+Run `fly launch` from the root directory
+
+_Launch wizard_
+```
+- YES to copy config to new app
+- NO to overwriting Dockerfile
+- YES to modifying configuration, click to open setting page, select Postgres and Redis instances
+```
+
+### Import secrets
+- DATABASE_URL and REDIS_URL are set by `fly launch`, all others need to be imported
+- Modify `.envs/.production/.django` as needed, if a service isnt ready just leave a temp value
+- You must comment out `REDIS_URL`
+
+Run the following command to import the secrets to Fly:
+
+   ```
+   cat .envs/.production/.django | fly secrets import
+   ```
+
+### Deploy
+
+Run `fly deploy`
+
+If deployment was successful, create a superuser via ssh console
+
+```
+fly ssh console
+python manage.py createsuperuser
+```
+
+Now open tabs for Django Admin and test-task to verify the system is working.
+
+--------------------
+
+#### If you've gotten this far congratulations you are now live on Fly.io!
+
+### Resources
+- [Example code on Github](https://github.com/mswaringen/fly-cookiecutter-django)
+- [Deploy with Github Actions](https://fly.io/docs/app-guides/continuous-deployment-with-github-actions/)  
